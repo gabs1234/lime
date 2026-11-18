@@ -39,6 +39,15 @@ def ghostty_app() -> object | None:
     osascript per move, which was slow enough for Ghostty's own
     scroll-to-bottom-on-keystroke to flash first.
     """
+    if (
+        sys.platform != "darwin"
+        or os.environ.get("SSH_CONNECTION")
+        or os.environ.get("SSH_TTY")
+        or not (
+            os.environ.get("TERM_PROGRAM") == "ghostty" or "ghostty" in os.environ.get("TERM", "")
+        )
+    ):
+        return None
     try:
         from ScriptingBridge import SBApplication
     except ImportError:

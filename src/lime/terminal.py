@@ -11,7 +11,7 @@ import struct
 import termios
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TextIO
 
 # A Markdown document must not be able to inject terminal commands. Sanitize both
@@ -19,6 +19,14 @@ from typing import TextIO
 CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 RGB = tuple[int, int, int]
 Palette = tuple[RGB, RGB, RGB]
+_PENDING_INPUT = bytearray()
+
+
+def pending_input() -> bytes:
+    """Keyboard bytes arriving during terminal queries belong to the reader."""
+    result = bytes(_PENDING_INPUT)
+    _PENDING_INPUT.clear()
+    return result
 
 
 @dataclass(frozen=True)
@@ -45,13 +53,13 @@ def read_palette(fd: int, timeout: float = 0.3) -> TerminalTheme | None:
     settings[3] &= ~(termios.ICANON | termios.ECHO)
     settings[6][termios.VMIN] = 0
     settings[6][termios.VTIME] = 0
+    data = b""
     try:
         termios.tcsetattr(fd, termios.TCSANOW, settings)
         if select.select([fd], [], [], 0)[0]:
             return None
         os.write(fd, b"\x1b]4;2;?;6;?;4;?\x1b\\\x1b]10;?\x1b\\\x1b]11;?\x1b\\")
         deadline = time.monotonic() + timeout
-        data = b""
         while time.monotonic() < deadline and len(data) < 4096:
             if not select.select([fd], [], [], max(0, deadline - time.monotonic()))[0]:
                 break
@@ -72,6 +80,7 @@ def read_palette(fd: int, timeout: float = 0.3) -> TerminalTheme | None:
                     colors[b"11"],
                 )
     finally:
+        _PENDING_INPUT.extend(COLOR_REPLY.sub(b"", data))
         termios.tcsetattr(fd, termios.TCSANOW, original)
     return None
 
@@ -89,11 +98,11 @@ def sync(fd: int, timeout: float = 0.25) -> bool:
     settings[3] &= ~(termios.ICANON | termios.ECHO)
     settings[6][termios.VMIN] = 0
     settings[6][termios.VTIME] = 0
+    data = b""
     try:
         termios.tcsetattr(fd, termios.TCSANOW, settings)
         os.write(fd, b"\x1b[5n")
         deadline = time.monotonic() + timeout
-        data = b""
         while time.monotonic() < deadline and len(data) < 256:
             if not select.select([fd], [], [], max(0, deadline - time.monotonic()))[0]:
                 break
@@ -106,6 +115,7 @@ def sync(fd: int, timeout: float = 0.25) -> bool:
     except OSError:
         return False
     finally:
+        _PENDING_INPUT.extend(data.replace(b"\x1b[0n", b""))
         termios.tcsetattr(fd, termios.TCSANOW, original)
     return False
 
@@ -150,6 +160,76 @@ class Terminal:
                     cw, ch = max(1, x // c), max(1, y // r)
             except (OSError, ValueError):
                 pass
-        ghostty = env.get("TERM_PROGRAM") == "ghostty" or "ghostty" in env.get("TERM", "")
+        supported = env.get("TERM_PROGRAM") in {"ghostty", "kitty"} or any(
+            name in env.get("TERM", "") for name in ("ghostty", "kitty")
+        )
         multiplexed = any(env.get(key) for key in ("TMUX", "STY", "ZELLIJ"))
-        return cls(columns, rows, cw, ch, is_tty, is_tty and ghostty and not multiplexed)
+        return cls(columns, rows, cw, ch, is_tty, is_tty and supported and not multiplexed)
+
+
+CELL_REPLY = re.compile(rb"\x1b\[6;(\d+);(\d+)t")
+GRAPHICS_REPLY = re.compile(rb"\x1b_Gi=2147483647;([^\x1b]*)\x1b\\")
+
+
+def read_terminal_info(
+    fd: int,
+    *,
+    probe: bool = True,
+    timeout: float = 0.2,
+) -> tuple[tuple[int, int] | None, bool | None]:
+    """Query physical cells through the TTY, including when SSH lost PTY pixels."""
+    original = termios.tcgetattr(fd)
+    settings = termios.tcgetattr(fd)
+    settings[3] &= ~(termios.ICANON | termios.ECHO)
+    settings[6][termios.VMIN] = settings[6][termios.VTIME] = 0
+    data = b""
+    cell, graphics = None, None
+    try:
+        termios.tcsetattr(fd, termios.TCSANOW, settings)
+        if select.select([fd], [], [], 0)[0]:
+            return cell, graphics
+        request = b"\x1b[16t"
+        if probe:
+            request += b"\x1b_Gi=2147483647,a=q,t=d,f=24,s=1,v=1;AAAA\x1b\\"
+        os.write(fd, request)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline and len(data) < 4096:
+            if not select.select([fd], [], [], max(0, deadline - time.monotonic()))[0]:
+                break
+            chunk = os.read(fd, 1)
+            if not chunk:
+                break
+            data += chunk
+            match = CELL_REPLY.search(data)
+            if match:
+                height, width = map(int, match.groups())
+                if 0 < width <= 1000 and 0 < height <= 1000:
+                    cell = width, height
+            match = GRAPHICS_REPLY.search(data)
+            if match:
+                graphics = match[1] == b"OK"
+            if cell and (not probe or graphics is not None):
+                break
+    finally:
+        _PENDING_INPUT.extend(GRAPHICS_REPLY.sub(b"", CELL_REPLY.sub(b"", data)))
+        termios.tcsetattr(fd, termios.TCSANOW, original)
+    return cell, graphics
+
+
+def refresh_terminal(terminal: Terminal, *, probe: bool = False) -> Terminal:
+    if not terminal.is_tty or any(os.environ.get(key) for key in ("TMUX", "STY", "ZELLIJ")):
+        return terminal
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+        try:
+            cell, graphics = read_terminal_info(fd, probe=probe)
+        finally:
+            os.close(fd)
+    except (OSError, termios.error):
+        return terminal
+    return replace(
+        terminal,
+        cell_width=cell[0] if cell else terminal.cell_width,
+        cell_height=cell[1] if cell else terminal.cell_height,
+        graphics=graphics if graphics is not None else terminal.graphics,
+    )

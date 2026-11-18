@@ -97,3 +97,56 @@ def test_sync_asks_with_a_device_status_report():
     finally:
         os.close(master)
         os.close(slave)
+
+
+@pytest.mark.parametrize("supported", [True, False])
+def test_tty_reports_find_cell_dimensions_without_environment_hints(supported):
+    master, slave = os.openpty()
+    original = termios.tcgetattr(slave)
+    terminal.pending_input()
+
+    def remote_terminal():
+        assert select.select([master], [], [], 1)[0]
+        request = os.read(master, 1024)
+        assert b"\x1b[16t" in request and b"a=q,t=d" in request
+        os.write(
+            master,
+            b"n\x1b[6;21;10t\x1b_Gi=2147483647;" + (b"OK" if supported else b"ENOTSUP") + b"\x1b\\",
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            peer = pool.submit(remote_terminal)
+            assert terminal.read_terminal_info(slave) == ((10, 21), supported)
+            peer.result()
+        assert terminal.pending_input() == b"n"
+        assert_restored(slave, original)
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def test_terminal_info_timeout_and_queued_keys_restore_tty():
+    master, slave = os.openpty()
+    original = termios.tcgetattr(slave)
+    try:
+        assert terminal.read_terminal_info(slave, timeout=0.01) == (None, None)
+        os.read(master, 1024)
+        os.write(master, b"next command\n")
+        assert select.select([slave], [], [], 1)[0]
+        assert terminal.read_terminal_info(slave) == (None, None)
+        assert os.read(slave, 1024) == b"next command\n"
+        assert_restored(slave, original)
+    finally:
+        os.close(master)
+        os.close(slave)
+
+
+def test_kitty_is_a_supported_graphics_terminal():
+    master, slave = os.openpty()
+    try:
+        with os.fdopen(os.dup(slave), "w") as stream:
+            assert terminal.Terminal.detect(stream, {"TERM": "xterm-kitty"}).graphics
+    finally:
+        os.close(master)
+        os.close(slave)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import time
@@ -355,6 +356,10 @@ def run(
         # Ctrl-C is a byte in raw mode; an external interrupt still leaves a
         # reader cleanly, as documented for interactive mode.
         code = 0
+    except OSError as error:
+        if error.errno not in (errno.EIO, errno.ENXIO, errno.EBADF):
+            raise
+        code = 128 + signal.SIGHUP
     finally:
         try:
             if state.mode != "idle":
@@ -362,6 +367,9 @@ def run(
             if title_saved:
                 stream.write("\x1b[23;2t")
             stream.flush()
+        except OSError as error:
+            if error.errno not in (errno.EIO, errno.ENXIO, errno.EBADF, errno.EPIPE):
+                raise
         finally:
             if previous_winch is not None:
                 signal.signal(signal.SIGWINCH, previous_winch)

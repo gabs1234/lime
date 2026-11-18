@@ -15,7 +15,7 @@ from lime.mermaid import Mermaid
 from lime.reader import Layout
 from lime.reader import run as read
 from lime.render import RowCounter, markdown_theme, render
-from lime.terminal import Terminal, clean_text, query_palette
+from lime.terminal import Terminal, clean_text, query_palette, refresh_terminal
 
 USAGE = "usage: lime DOC.md  (or - to read stdin)"
 
@@ -36,12 +36,15 @@ def main(argv: list[str] | None = None) -> int:
 
     terminal = Terminal.detect(sys.stdout)
     plain = "NO_COLOR" in os.environ or not terminal.is_tty
+    if not plain:
+        terminal = refresh_terminal(terminal, probe=not terminal.graphics)
     content_width = settings.width
     graphics = not plain and terminal.rows >= 6 and terminal.graphics
     native_theme = query_palette() if graphics else None
     normalized_source = clean_text(source)
     heading_cache = ImageCache[tuple[HeadingImage, ...]]()
     mermaid_cache = ImageCache[bytes]()
+    printed = False
 
     def print_document(columns: int, rows: int) -> Layout:
         """Render the document once at the given size; report its heading rows.
@@ -51,7 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         holds the output row of the document start and each top-level heading,
         which the reader scrolls to after a reflow.
         """
+        nonlocal printed, native_theme
         local = replace(terminal, columns=columns, rows=rows)
+        if printed and graphics:
+            local = refresh_terminal(local)
+            native_theme = query_palette() or native_theme
+        printed = True
         vertical = (
             min(settings.vertical_padding, max(0, (rows - 8) // 2)) if terminal.is_tty else 0
         )

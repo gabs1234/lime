@@ -237,3 +237,22 @@ def test_escape_timeout_leaves_the_rest_of_a_truncated_sequence(prefix):
     finally:
         os.close(read_end)
         os.close(write_end)
+
+
+@pytest.mark.parametrize("reply", [b"\x1b_Gi=12;OK\x1b\\", b"\x1b]10;rgb:aa/bb/cc\x1b\\"])
+def test_late_terminal_replies_are_never_decoded_as_keys(reply):
+    from lime.keys import decode
+
+    assert decode(reply + b"q") == (None, b"q")
+
+
+def test_raw_mode_cleanup_survives_a_disconnected_pty():
+    master, slave = os.openpty()
+    try:
+        with raw_mode(slave):
+            os.close(master)
+            master = -1
+    finally:
+        if master >= 0:
+            os.close(master)
+        os.close(slave)

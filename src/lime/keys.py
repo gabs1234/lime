@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import select
 import termios
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import StrEnum
+
+from lime.terminal import pending_input
 
 CONTROLS = {
     b"\r": "ENTER",
@@ -54,6 +57,7 @@ class KeyReader:
         unless `timeout` is given, in which case an idle wait that long returns
         None so the caller can act on a pending resize reflow.
         """
+        self.buffer += pending_input()
         while True:
             event, remainder = decode(self.buffer)
             # Complete events return immediately, except a bare Escape: it may
@@ -98,6 +102,16 @@ def decode(data: bytes) -> tuple[Key | str | None, bytes]:
     if data[:1] == b"\x1b":
         if len(data) == 1:
             return Key.ESCAPE, b""
+        if data[1:2] in (b"]", b"_"):
+            # Late OSC/APC query replies are terminal messages, never keypresses.
+            endings = [
+                index + len(ending)
+                for ending in (b"\x1b\\", b"\x07")
+                if (index := data.find(ending, 2)) >= 0
+            ]
+            if endings:
+                return None, data[min(endings) :]
+            return None, b"" if len(data) > 4096 else data
         for sequence, name in SEQUENCES.items():
             if data.startswith(sequence):
                 return Key[name], data[len(sequence) :]
@@ -129,7 +143,11 @@ def raw_mode(fd: int) -> Iterator[None]:
         termios.tcsetattr(fd, termios.TCSANOW, settings)
         yield
     finally:
-        termios.tcsetattr(fd, termios.TCSANOW, original)
+        try:
+            termios.tcsetattr(fd, termios.TCSANOW, original)
+        except termios.error as error:
+            if error.args[0] not in (errno.EIO, errno.ENXIO, errno.EBADF):
+                raise
 
 
 def read_key(fd: int, timeout: float = 0.05) -> Key | str | None:

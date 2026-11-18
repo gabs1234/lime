@@ -309,9 +309,10 @@ integral_(-oo)^oo e^(-x^2) dif x = sqrt(pi)
 ```
 ````
 
-Run `lime examples/math.md` to try inline math in paragraphs, lists and quotes.
-Put inline math directly against its delimiters (`$x$`). Headings, links, tables,
-and formulas that are too wide to fit retain their source.
+Run `lime examples/math.md` to try inline math in paragraphs, lists, quotes and
+tables. Column widths account for the rendered equations. Narrow tables switch
+to labelled records. Put inline math directly against its delimiters (`$x$`).
+Headings, links, and formulas that are too wide to fit retain their source.
 
 Images use transparent backgrounds and the terminal foreground color. Text
 around inline math remains selectable. Equation images themselves cannot be

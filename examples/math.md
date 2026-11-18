@@ -53,7 +53,7 @@ $$
 \thisCommandDoesNotExist{x}
 $$
 
-Math in tables, headings and links remains readable source.
+Tables render inline math too. Math in headings and links remains readable source.
 
 | Description | Source |
 |---|---|

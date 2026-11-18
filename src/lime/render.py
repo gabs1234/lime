@@ -12,6 +12,7 @@ from markdown_it.token import Token
 from rich import box
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.markdown import CodeBlock, Heading, Markdown, TableElement
+from rich.measure import Measurement
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -26,6 +27,7 @@ from lime.math_layout import (
     MathGraphics,
     MathParagraph,
     MathSpan,
+    MathTableCell,
 )
 from lime.math_parser import math_plugin
 from lime.math_render import Expression, MathRenderer
@@ -101,25 +103,37 @@ class ResponsiveTable(TableElement):
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         headers = self.header.row.cells if self.header and self.header.row else []
         rows = self.body.rows if self.body else []
+        columns = [[header.renderable] for header in headers]
+        for row in rows:
+            for column, cell in zip(columns, row.cells):
+                column.append(cell.renderable)
+        minimum = (
+            sum(
+                max(Measurement.get(console, options, cell).minimum for cell in column)
+                for column in columns
+            )
+            + len(headers) * 3
+            + 1
+        )
         # Rich can hide entire columns when there are too many to fit. Switch to
         # labelled records before that happens so every value remains readable.
-        if len(headers) * 10 + 1 > options.max_width:
+        if len(headers) * 10 + 1 > options.max_width or minimum > options.max_width:
             if not rows:
                 for header in headers:
-                    yield header.content
+                    yield header.renderable
             for index, row in enumerate(rows):
                 if index:
                     yield Text()
                 for header, cell in zip(headers, row.cells):
-                    label = header.content.copy()
-                    label.stylize("bold")
-                    yield Text.assemble(label, ": ", cell.content)
+                    yield cell.labelled(header)
             return
         table = Table(box=box.ROUNDED, border_style="dim", padding=(0, 1), expand=False)
         for header in headers:
-            table.add_column(header.content, header_style="bold", overflow="fold")
+            table.add_column(
+                header.renderable, header_style="bold", overflow="fold", vertical="middle"
+            )
         for row in rows:
-            table.add_row(*(cell.content for cell in row.cells))
+            table.add_row(*(cell.renderable for cell in row.cells))
         yield table
 
 
@@ -130,6 +144,8 @@ class Document(Markdown):
         "fence": FencedCode,
         "code_block": FencedCode,
         "table_open": ResponsiveTable,
+        "th_open": MathTableCell,
+        "td_open": MathTableCell,
         "paragraph_open": MathParagraph,
         "math_inline": MathSpan,
         "math_block": MathBlock,
@@ -168,7 +184,7 @@ def prepare_math(tokens: list[Token], unsupported: int = 0) -> None:
     """Preserve math as explicit source in contexts without a graphics layout."""
     fences = {"math": "latex", "latex-math": "latex", "typst-math": "typst"}
     for token in tokens:
-        if token.type in {"heading_open", "table_open", "link_open"}:
+        if token.type in {"heading_open", "link_open"}:
             unsupported += 1
         if token.type == "fence" and token.info.strip() in fences:
             token.meta["expression"] = Expression(
@@ -185,7 +201,7 @@ def prepare_math(tokens: list[Token], unsupported: int = 0) -> None:
                 token.meta["expression"] = expression
         if token.children:
             prepare_math(token.children, unsupported)
-        if token.type in {"heading_close", "table_close", "link_close"}:
+        if token.type in {"heading_close", "link_close"}:
             unsupported -= 1
 
 

@@ -17,7 +17,8 @@ from typing import TextIO
 
 from PIL import Image
 from rich.console import Console, ConsoleOptions, RenderResult
-from rich.markdown import MarkdownElement, Paragraph
+from rich.markdown import MarkdownElement, Paragraph, TableDataElement
+from rich.measure import Measurement
 from rich.text import Text
 
 from lime.cache import ImageCache
@@ -228,6 +229,28 @@ class MathContent:
     show_source: bool = False
     justify: str = "left"
 
+    def __rich_measure__(self, console: Console, options: ConsoleOptions) -> Measurement:
+        minimum = maximum = line = 0
+        for part in self.parts:
+            if isinstance(part, Expression):
+                try:
+                    if self.renderer is None or self.graphics is None:
+                        raise MathError("text output")
+                    image = self.renderer.get(part)
+                    width = math.ceil(image.width / (self.graphics.terminal.cell_width * 2))
+                    minimum = max(minimum, width)
+                    line += width
+                    continue
+                except (OSError, ValueError):
+                    part = Text(part.fallback())
+            for index, fragment in enumerate(part.split("\n", allow_blank=True)):
+                if index:
+                    maximum, line = max(maximum, line), 0
+                measure = fragment.__rich_measure__(console, options)
+                minimum = max(minimum, measure.minimum)
+                line += measure.maximum
+        return Measurement(minimum, max(minimum, maximum, line))
+
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         if self.renderer is None or self.graphics is None:
             yield Text.assemble(
@@ -252,6 +275,50 @@ class MathContent:
             for part in self.parts:
                 if isinstance(part, Expression):
                     yield Text(part.fallback(), style="dim")
+
+
+class MathTableCell(TableDataElement):
+    @classmethod
+    def create(cls, markdown, token):
+        result = super().create(markdown, token)
+        result.renderer, result.graphics = markdown.math_renderer, markdown.math_graphics
+        result.show_source = markdown.show_math_source
+        result.parts = []
+        return result
+
+    def on_text(self, context, text):
+        value = Text(text, style=context.current_style) if isinstance(text, str) else text.copy()
+        self.content.append_text(value)
+        if self.parts and isinstance(self.parts[-1], Text):
+            self.parts[-1].append(value)
+        else:
+            self.parts.append(value)
+
+    def on_child_close(self, context, child):
+        if isinstance(child, MathSpan):
+            self.parts.append(child.expression)
+            self.content.append(child.expression.fallback(), style="cyan")
+            return False
+        return super().on_child_close(context, child)
+
+    @property
+    def renderable(self) -> Text | MathContent:
+        if self.renderer and self.graphics and any(isinstance(p, Expression) for p in self.parts):
+            return MathContent(
+                self.parts, self.renderer, self.graphics, self.show_source, self.justify
+            )
+        return self.content
+
+    def labelled(self, header: MathTableCell) -> MathContent:
+        parts = []
+        for part in header.parts:
+            if isinstance(part, Text):
+                part = part.copy()
+                part.stylize("bold")
+            parts.append(part)
+        return MathContent(
+            [*parts, Text(": "), *self.parts], self.renderer, self.graphics, self.show_source
+        )
 
 
 class MathParagraph(Paragraph):

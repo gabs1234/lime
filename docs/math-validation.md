@@ -22,6 +22,10 @@ and cell size discovery. To check stdin and scrollback, run:
 printf '%s\n' '\frac{1}{1+x^2}' | uv run lime --format latex-math -
 ```
 
+The table regression fixture covers inline and display-style fractions in
+table cells. Check that images stay inside the borders when columns align
+right or center. At narrow widths the same content appears as labelled records.
+
 Typst reports each equation's baseline. Lime estimates the terminal text
 baseline from the cell height and reserves enough rows for tall equations.
 Inline text stays selectable. Use `--show-math-source` to copy an equation.

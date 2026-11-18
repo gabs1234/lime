@@ -1,7 +1,7 @@
 # 🍋‍🟩 lime
 
 ### Beautiful markdown rendering in your terminal
-Built for Ghostty and macOS, might work with other things, idk, I haven't tested it.
+Built around Ghostty's graphics, native scrollback, and search.
 
 ![Lime demo](demo.gif "Demo")
 
@@ -12,6 +12,7 @@ Built for Ghostty and macOS, might work with other things, idk, I haven't tested
 - Highlighted code
 - Images
 - Mermaid diagrams
+- LaTeX and Typst math, including inline equations
 - Your terminals native theme
 - Jump between headings with keyboard shortcuts
 - Table of contents navigation
@@ -21,7 +22,9 @@ Built for Ghostty and macOS, might work with other things, idk, I haven't tested
 
 ## Installation
 
-Requires macOS and [Ghostty](https://ghostty.org) 1.3 or newer. Install with
+Use [Ghostty](https://ghostty.org) 1.3 or newer. Rendering works on macOS and
+Linux, including direct SSH sessions; heading jump keys require local Ghostty
+on macOS. Kitty-compatible graphics are also supported. Install with
 [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```sh
@@ -76,6 +79,17 @@ Give lime a file to read:
 ```sh
 lime README.md
 ```
+
+Or pipe Markdown or a clipboard expression:
+
+```sh
+pbpaste | lime -                         # Markdown on macOS
+wl-paste | lime --format latex-math -    # bare LaTeX math on Wayland
+pbpaste | lime --format typst-math -     # bare Typst math on macOS
+```
+
+Expression modes print and exit, preserving scrollback. Add `--once` to do the
+same for Markdown. A piped document can also omit the `-` argument.
 
 | Key | Action |
 | --- | --- |
@@ -207,7 +221,7 @@ If automation is unavailable or neither approach identifies a terminal, the
 navigation keys do nothing — the document still renders, and your trackpad, ⌘F
 and selection all still work.
 
-Interactive mode requires Ghostty without tmux, screen, or Zellij, terminal
+Interactive mode requires supported graphics without tmux, screen, or Zellij, terminal
 output, and a controlling terminal for keys. Redirected output and `NO_COLOR`
 always print and exit. Markdown piped **into** lime, such as `cat DOC.md | lime -`,
 can still use the reader when output is a terminal; keyboard input comes from the
@@ -237,7 +251,7 @@ but anything touching Ghostty's viewport should be checked by eye in Ghostty.
 
 Lime reads `$XDG_CONFIG_HOME/lime/config.yaml`, or `~/.config/lime/config.yaml`,
 and uses the built-in defaults if that file is absent. It is the only way to
-configure lime: the command takes a document and nothing else. Unknown keys or
+configure layout. Input format and math source visibility have command-line options. Unknown keys or
 wrong types produce an error. Lime never reads configuration from a document's
 directory.
 
@@ -274,6 +288,56 @@ relative to the document. Remote URLs, unsupported formats, missing images, and
 images inside lists/quotes retain their caption/link. PNG/JPEG/WebP files are
 limited to 20 MB and 20 megapixels.
 
+## Math
+
+Install [Typst](https://typst.app/open-source/) 0.15 or newer and put `typst` on
+PATH. No LaTeX installation or Node runtime is needed. Lime includes a pinned
+copy of [MiTeX](https://typst.app/universe/package/mitex/) 0.2.7 to convert LaTeX
+equations locally; rendering never downloads Typst packages.
+
+Use `$x^2$` or `\(x^2\)` for inline LaTeX, and `$$ ... $$` or `\[ ... \]` for
+display equations. Fenced `math` and `latex-math` blocks also contain LaTeX math.
+Read a Markdown paper with `lime paper.md`: its prose and LaTeX equations are
+handled together. `--format latex-math` treats the whole input as one expression.
+Display equations support `\tag{1}` and `\tag*{S1}`; the tag appears after the
+equation, with parentheses for the unstarred form.
+Native Typst math uses an explicit fence:
+
+````markdown
+```typst-math
+integral_(-oo)^oo e^(-x^2) dif x = sqrt(pi)
+```
+````
+
+Run `lime examples/math.md` to try inline math in paragraphs, lists and quotes.
+Put inline math directly against its delimiters (`$x$`). Headings, links, tables,
+and formulas that are too wide to fit retain their source.
+
+Images use transparent backgrounds and the terminal foreground color. Text
+around inline math remains selectable. Equation images themselves cannot be
+searched or copied as text: use `--show-math-source` to print their source below
+the rendered paragraph or display block.
+
+The expression formats accept either a bare expression or surrounding math
+delimiters. You can also read remote Markdown with a local renderer:
+
+```sh
+ssh host 'cat notes.md' | lime -
+```
+
+Ghostty and Kitty graphics work through direct SSH connections. Lime queries
+graphics support and physical cell dimensions through the TTY when necessary;
+terminal names alone are not required. Multiplexers remain outside graphics
+support. Heading jump keys still require local Ghostty on macOS; manual
+scrolling works on Linux, in Kitty, and over SSH.
+
+MiTeX supports common scientific notation, matrices, cases, aligned equations,
+and self-contained user macros. Native Typst snippets use math syntax only.
+Missing Typst, unsupported or invalid formulas, `NO_COLOR`, and redirected
+output all leave readable source.
+
+For reproducible compatibility checks, see [math validation](docs/math-validation.md).
+
 ## Your terminal's theme
 
 Body text and backgrounds inherit Ghostty's defaults. Syntax highlighting and
@@ -295,8 +359,9 @@ cat DOC.md | lime -
 lime DOC.md > rendered.txt
 ```
 
-Lime takes one argument: a document, or `-` for stdin. Image headings need
-Ghostty and a successful palette query; they are disabled inside tmux, screen,
+Lime takes a document, or `-` for stdin, plus optional input/rendering flags
+shown by `lime --help`. Image headings need
+Kitty-compatible graphics and a successful palette query; they are disabled inside tmux, screen,
 and Zellij, and under redirected output or `NO_COLOR`. Elsewhere headings fall
 back to text.
 
@@ -315,7 +380,7 @@ and image storage limits apply, so exceptionally long documents can lose older
 content. The heading font uses Helvetica Neue on macOS, common system fonts on
 Linux, or Pillow's fallback, and is not configurable in this release.
 
-HTML layout, LaTeX, remote image downloads, live refresh, and section paging are
+HTML layout, whole LaTeX/Typst documents, remote image downloads, live refresh, and section paging are
 outside v0.1. Raw HTML is displayed literally. Terminal control characters in
 document text are removed. Code is only displayed; Mermaid source is passed to
 the optional local renderer. Lime itself does not fetch remote document content.

@@ -1,0 +1,52 @@
+[
+  {
+    "name": "fraction",
+    "latex": "\\frac{x}{y}",
+    "typst": "frac(x, y)"
+  },
+  {
+    "name": "fourier",
+    "latex": "\\widehat{f}(\\xi)=\\int_{-\\infty}^{\\infty}f(x)e^{-2\\pi i x\\xi}\\,\\mathrm{d}x",
+    "typst": "hat(f)(xi) = integral_(-oo)^oo f(x) e^(-2 pi i x xi) thin upright(d) x"
+  },
+  {
+    "name": "fresnel",
+    "latex": "U(x,z)=\\frac{e^{ikz}}{\\sqrt{i\\lambda z}}\\int_{-\\infty}^{\\infty}U_0(x')e^{\\frac{i\\pi(x-x')^2}{\\lambda z}}\\,\\mathrm{d}x'",
+    "typst": "U(x,z) = frac(e^(i k z), sqrt(i lambda z)) integral_(-oo)^oo U_0(x') e^(frac(i pi (x-x')^2,lambda z)) thin upright(d) x'"
+  },
+  {
+    "name": "angular-spectrum",
+    "latex": "H(k_x,k_y;z)=\\exp\\left(iz\\sqrt{k^2-k_x^2-k_y^2}\\right)",
+    "typst": "H(k_x,k_y;z) = exp lr((i z sqrt(k^2-k_x^2-k_y^2)))"
+  },
+  {
+    "name": "aligned",
+    "latex": "\\begin{aligned}(a+b)^2 &= a^2+2ab+b^2 \\\\ &= a(a+b)+b(a+b)\\end{aligned}",
+    "typst": "(a+b)^2 &= a^2+2a b+b^2 \\ &= a(a+b)+b(a+b)"
+  },
+  {
+    "name": "matrix",
+    "latex": "\\begin{pmatrix}1&0\\\\0&e^{i\\phi}\\end{pmatrix}\\begin{pmatrix}a\\\\b\\end{pmatrix}",
+    "typst": "mat(1,0;0,e^(i phi.alt)) vec(a,b)"
+  },
+  {
+    "name": "cases",
+    "latex": "f(x)=\\begin{cases}x^2 & x\\geq 0\\\\-x & x<0\\end{cases}",
+    "typst": "f(x) = cases(x^2 & x >= 0, -x & x < 0)"
+  },
+  {
+    "name": "macro",
+    "latex": "\\newcommand{\\vect}[1]{\\boldsymbol{#1}}\\vect{k}\\cdot\\vect{x}",
+    "typst": "bold(k) dot.c bold(x)"
+  },
+  {
+    "name": "bra-ket",
+    "latex": "\\langle\\psi|\\hat{A}|\\psi\\rangle=\\sum_n a_n|c_n|^2",
+    "typst": "chevron.l psi | hat(A) | psi chevron.r = sum_n a_n |c_n|^2"
+  },
+  {
+    "name": "limits",
+    "latex": "\\lim_{\\epsilon\\to0^+}\\frac{1}{x+i\\epsilon}=\\mathcal{P}\\frac{1}{x}-i\\pi\\delta(x)",
+    "typst": "lim_(epsilon -> 0^+) frac(1,x+i epsilon) = cal(P) frac(1,x)-i pi delta(x)"
+  }
+]

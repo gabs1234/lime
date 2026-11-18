@@ -20,8 +20,17 @@ from rich.text import Text
 from rich.theme import Theme
 
 from lime.graphics import Headings
+from lime.math_layout import (
+    GraphicsStream,
+    MathBlock,
+    MathGraphics,
+    MathParagraph,
+    MathSpan,
+)
+from lime.math_parser import math_plugin
+from lime.math_render import Expression, MathRenderer
 from lime.outline import Section, heading_text, outline
-from lime.terminal import clean_text
+from lime.terminal import Terminal, clean_text
 
 _VERTICAL = re.compile(r"\x1b\[(\d*)([AB])")
 
@@ -121,17 +130,72 @@ class Document(Markdown):
         "fence": FencedCode,
         "code_block": FencedCode,
         "table_open": ResponsiveTable,
+        "paragraph_open": MathParagraph,
+        "math_inline": MathSpan,
+        "math_block": MathBlock,
     }
 
-    def __init__(self, markup: str, *, line_numbers: bool = True, **kwargs) -> None:
+    def __init__(
+        self,
+        markup: str,
+        *,
+        line_numbers: bool = True,
+        math_renderer: MathRenderer | None = None,
+        math_graphics: MathGraphics | None = None,
+        show_math_source: bool = False,
+        expression: Expression | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__("", **kwargs)
         self.line_numbers = line_numbers
+        self.math_renderer, self.math_graphics = math_renderer, math_graphics
+        self.show_math_source = show_math_source
         # HTML is displayed literally; it must not silently swallow document text.
         self.parsed = (
             MarkdownIt("commonmark", {"html": False})
             .enable(["strikethrough", "table"])
+            .use(math_plugin)
             .parse(markup)
         )
+        prepare_math(self.parsed)
+        if expression is not None:
+            token = Token("math_block", "math", 0)
+            token.meta["expression"] = expression
+            self.parsed = [token]
+
+
+def prepare_math(tokens: list[Token], unsupported: int = 0) -> None:
+    """Preserve math as explicit source in contexts without a graphics layout."""
+    fences = {"math": "latex", "latex-math": "latex", "typst-math": "typst"}
+    for token in tokens:
+        if token.type in {"heading_open", "table_open", "link_open"}:
+            unsupported += 1
+        if token.type == "fence" and token.info.strip() in fences:
+            token.meta["expression"] = Expression(
+                token.content.rstrip("\n"), fences[token.info.strip()], True
+            )
+            token.type = "math_block"
+            token.tag = "math"
+        elif token.type in {"math_inline", "math_block"}:
+            expression = Expression(token.content, display=token.type == "math_block")
+            if unsupported:
+                token.type, token.tag = "code_inline", "code"
+                token.content = expression.fallback()
+            else:
+                token.meta["expression"] = expression
+        if token.children:
+            prepare_math(token.children, unsupported)
+        if token.type in {"heading_close", "table_close", "link_close"}:
+            unsupported -= 1
+
+
+def math_expressions(tokens: list[Token]) -> list[Expression]:
+    result = []
+    for token in tokens:
+        if "expression" in token.meta:
+            result.append(token.meta["expression"])
+        result.extend(math_expressions(token.children or []))
+    return result
 
 
 def safe_link(href: str, base: Path) -> str:
@@ -196,21 +260,40 @@ def render(
     anchors: list[int] | None = None,
     mermaid=None,
     images=None,
+    math_renderer: MathRenderer | None = None,
+    math_terminal: Terminal | None = None,
+    show_math_source: bool = False,
+    expression: Expression | None = None,
 ) -> list[Section]:
+    graphics = MathGraphics(math_terminal, source) if math_terminal and math_renderer else None
     document = Document(
         clean_text(source),
         code_theme="ansi_light",
         hyperlinks=console.is_terminal and console.color_system is not None,
         line_numbers=line_numbers,
+        math_renderer=math_renderer,
+        math_graphics=graphics,
+        show_math_source=show_math_source,
+        expression=expression,
     )
     prepare(document.parsed, base)
     tokens = document.parsed
     sections = outline(tokens)
+    if math_renderer:
+        math_renderer.schedule(math_expressions(tokens))
 
     def emit(batch: list[Token]) -> None:
         if batch:
             document.parsed = batch
-            console.print(Padding(document, (0, margin)), highlight=False)
+            original = console.file
+            try:
+                if graphics:
+                    console.file = GraphicsStream(original, graphics)
+                console.print(Padding(document, (0, margin)), highlight=False)
+            finally:
+                console.file = original
+                if graphics:
+                    graphics.reset()
 
     def record() -> None:
         # Called at the document start and before each top-level heading, in the
